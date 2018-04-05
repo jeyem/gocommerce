@@ -11,7 +11,6 @@ import (
 type User struct {
 	ID                  bson.ObjectId `bson:"_id,omitempty"`
 	Email               string        `bson:"email"`
-	Sites               []Site        `bson:"sites"`
 	Fullname            string        `bson:"fullname"`
 	Password            string        `bson:"password"`
 	OrginEmail          string        `bson:"orgin_email"`
@@ -19,6 +18,7 @@ type User struct {
 	SecureKeyExpireTime time.Time     `bson:"secure_key_expire_time"`
 	Gender              string        `bson:"gender"`
 	Birthday            time.Time     `bson:"birthday"`
+	Role                string        `bson:"role"`
 	Call                string        `bson:"call"`
 	Avatar              string        `bson:"avatar"`
 	CreatedAt           time.Time     `bson:"created_at"`
@@ -26,12 +26,6 @@ type User struct {
 	LastLogin           time.Time     `bson:"last_login"`
 	GoogleID            string        `bson:"google_id"`
 	Keywords            []string      `bson:"keywords"`
-}
-
-type Site struct {
-	Site        bson.ObjectId `bson:"site"`
-	IsOwner     bool          `bson:"is_owner" `
-	Permissions []string      `bson:"permissions"`
 }
 
 func (u *User) Save() error {
@@ -54,16 +48,9 @@ func (u *User) Load(id bson.ObjectId) error {
 	return db.Get(u, id)
 }
 
-func (u *User) LoadWithIDAndSite(id, site bson.ObjectId) error {
-	return db.Where(bson.M{
-		"_id":  id,
-		"site": site,
-	}).Find(u)
-}
-func (u *User) LoadWithEmailAndSite(email string, site bson.ObjectId) error {
+func (u *User) LoadByEmail(email string) error {
 	return db.Where(bson.M{
 		"email": email,
-		"site":  site,
 	}).Find(u)
 }
 
@@ -72,7 +59,7 @@ func (u User) checkDuplicate() error {
 	if err := db.Where(bson.M{"$or": []bson.M{
 		{"email": u.Email}, {"call": u.Call}},
 	}); err == nil {
-		return duplicateuser
+		return ErrorDuplicateUser
 	}
 	return nil
 }
@@ -82,20 +69,13 @@ func (u *User) Update() error {
 	return db.Update(u)
 }
 
-func (u *User) LoadWithMail(email string) error {
-	email = EmailFixer(email)
-	return db.Where(bson.M{
-		"email": email,
-	}).Find(u)
-}
-
-func (u *User) LoadWithCellphone(cellphone string) error {
+func (u *User) LoadByCall(cellphone string) error {
 	return db.Where(bson.M{
 		"call": cellphone,
 	}).Find(u)
 }
 
-func (u *User) Auth(email, password string) error {
+func (u *User) AuthByMail(email, password string) error {
 	if err := u.LoadWithMail(email); err != nil {
 		return ErrorUserPass
 	}
@@ -106,8 +86,8 @@ func (u *User) Auth(email, password string) error {
 	return u.Update()
 }
 
-func (u *User) AuthWithSite(email, password string, site bson.ObjectId) error {
-	if err := u.LoadWithEmailAndSite(email, site); err != nil {
+func (u *User) AuthByCall(call, password string) error {
+	if err := u.LoadbyCall(call); err != nil {
 		return ErrorUserPass
 	}
 	if ok := CheckPassword(password, u.Password); !ok {
@@ -117,6 +97,38 @@ func (u *User) AuthWithSite(email, password string, site bson.ObjectId) error {
 	return u.Update()
 }
 
+func (u *User) AuthByCallAndSecureKey(call, key string) error {
+	if err := db.Where(bson.M{
+		"call":                   call,
+		"secure_key":             key,
+		"secure_key_expire_time": bson.M{"gt": time.Now()},
+	}).Find(u); err != nil {
+		return err
+	}
+	u.LastLogin = time.Now()
+	return u.Update()
+}
+
+func (u *User) AuthByMailAndSecureKey(email, key string) error {
+	if err := db.Where(bson.M{
+		"email":                  email,
+		"secure_key":             key,
+		"secure_key_expire_time": bson.M{"gt": time.Now()},
+	}).Find(u); err != nil {
+		return err
+	}
+	u.LastLogin = time.Now()
+	return u.Update()
+}
+
+func (u *User) GenerateSecureKey() string {
+	u.SecureKey = genSalt()
+	u.SecureKeyExpireTime = time.Now().Add(time.Hour)
+	u.Save()
+	return u.SecureKey
+}
+
+// minimal map responses
 func (u *User) Rest() echo.Map {
 	email := u.OrginEmail
 	return echo.Map{
