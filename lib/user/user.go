@@ -3,6 +3,8 @@ package user
 import (
 	"time"
 
+	"github.com/jeyem/gocommerce/util/random"
+
 	"github.com/labstack/echo"
 
 	"gopkg.in/mgo.v2/bson"
@@ -28,6 +30,11 @@ type User struct {
 	Keywords            []string      `bson:"keywords"`
 }
 
+func (u *User) Update() error {
+	u.setKeywords()
+	return db.Update(u)
+}
+
 func (u *User) Save() error {
 	u.LastModified = time.Now()
 	if u.ID.Valid() {
@@ -48,7 +55,7 @@ func (u *User) Load(id bson.ObjectId) error {
 	return db.Get(u, id)
 }
 
-func (u *User) LoadByEmail(email string) error {
+func (u *User) LoadByMail(email string) error {
 	return db.Where(bson.M{
 		"email": email,
 	}).Find(u)
@@ -64,11 +71,6 @@ func (u User) checkDuplicate() error {
 	return nil
 }
 
-func (u *User) Update() error {
-	u.setKeywords()
-	return db.Update(u)
-}
-
 func (u *User) LoadByCall(cellphone string) error {
 	return db.Where(bson.M{
 		"call": cellphone,
@@ -76,7 +78,7 @@ func (u *User) LoadByCall(cellphone string) error {
 }
 
 func (u *User) AuthByMail(email, password string) error {
-	if err := u.LoadWithMail(email); err != nil {
+	if err := u.LoadByMail(email); err != nil {
 		return ErrorUserPass
 	}
 	if ok := CheckPassword(password, u.Password); !ok {
@@ -122,9 +124,8 @@ func (u *User) AuthByMailAndSecureKey(email, key string) error {
 }
 
 func (u *User) GenerateSecureKey() string {
-	u.SecureKey = genSalt()
+	u.SecureKey = random.Rand(5)
 	u.SecureKeyExpireTime = time.Now().Add(time.Hour)
-	u.Save()
 	return u.SecureKey
 }
 
